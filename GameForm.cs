@@ -19,40 +19,47 @@ namespace Doodle_Jump
 
         private List<IPlatform> platforms;
 
-        // Для генерации платформ
-        private int platformsCreated = 0;
-        private float nextPlatformY = -40; // координата Y для следующей платформы сверху
-        private float lastPlatformX = 150; // позиция последней платформы по X
+        private int platformsCreated = 0;               // счетчик созданных платформ
+        private float nextPlatformY = -40;              // Y-координата для следующей платформы
+        private float lastPlatformX = 150;              // X-координата последней платформы
+
+        private float minPlatformSpacing = 40f;         // минимальное расстояние между платформами
+        private float maxPlatformSpacing = 100f;        // максимальное расстояние между платформами
+        private int minVisiblePlatforms = 12;            // минимальное количество платформ на экране
+        private float maxJumpHeight = 230f;             // максимальная высота прыжка игрока
 
         public GameForm()
         {
             InitializeComponent();
 
-            // Инициализация в конструкторе
-            player = new Player(100, 100);
+            this.ClientSize = new Size(400, 600); // задаем одинаковый размер окна
+            this.FormBorderStyle = FormBorderStyle.FixedSingle;
+            this.MaximizeBox = false;
 
+            game_timer.Interval = 16; // 60 кадров/сек
+
+            player = new Player(100, 100);
             platforms = new List<IPlatform>();
         }
 
         private void GameForm_Load(object sender, EventArgs e)
         {
-            this.DoubleBuffered = true; // важно для плавной графики
+            this.DoubleBuffered = true; // для сглаженной графики
             StartNewGame();
         }
 
         private void game_timer_Tick(object sender, EventArgs e)
         {
-            player.IsOnGround = false; // Сначала предполагаем, что игрок в воздухе
-
+            player.IsOnGround = false; // по умолчанию игрок в воздухе
             player.Update();
 
-            // Телепортация игрока при выходе за границы экрана
+            // телепортация по горизонтали
             if (player.Position.X < -Player.Width)
                 player.Position = new PointF(ClientSize.Width, player.Position.Y);
             else if (player.Position.X > ClientSize.Width)
                 player.Position = new PointF(-Player.Width, player.Position.Y);
 
-            // 1) Приземление на платформы
+            // обработка приземления
             foreach (var p in platforms.ToList())
             {
                 if (IsPlayerLandingOn(p))
@@ -62,45 +69,54 @@ namespace Doodle_Jump
                 }
             }
 
-            // 2) Прокрутка: игрок выше порога?
+            // прокрутка мира
             if (player.Position.Y < ScrollTriggerY)
             {
-                float dy = ScrollTriggerY - player.Position.Y;   // сколько поднялись
+                float dy = ScrollTriggerY - player.Position.Y;
                 ScrollWorld(dy);
-                score += (int)dy;                                // + очки
+                score += (int)dy;
             }
 
-            // 3) Упал ли игрок за нижний край?
+            // если упал за экран — конец игры
             if (player.Position.Y > ClientSize.Height)
                 GameOver();
 
-            Invalidate();        // перерисовать
+            Invalidate();
         }
 
         private void ScrollWorld(float dy)
         {
-            // Сдвигаем игрока на ScrollTriggerY (не выше этого уровня)
+            // фиксируем игрока на ScrollTriggerY
             player.Position = new PointF(player.Position.X, ScrollTriggerY);
 
-            // Сдвигаем все платформы вниз
+            // сдвигаем платформы вниз
             foreach (var p in platforms)
                 p.Position = new PointF(p.Position.X, p.Position.Y + dy);
 
-            // Удаляем платформы, которые вышли за нижнюю границу
+            // удаляем платформы, вышедшие за экран
             platforms.RemoveAll(p => p.Position.Y > ClientSize.Height + 50);
 
-            // Генерируем новые платформы, пока верхняя часть не заполнена
-            while (!TopIsFilled())
+            // добавляем недостающие платформы, если их стало меньше минимума
+            int visibleCount = platforms.Count(p => p.Position.Y >= 0 && p.Position.Y <= ClientSize.Height);
+            while (visibleCount < minVisiblePlatforms)
             {
                 AddRandomPlatform();
+                visibleCount++;
             }
         }
-
-        private float platformSpacing = 40f; // меньшее расстояние между платформами
 
         private void AddRandomPlatform()
         {
             float x = rnd.Next(50, ClientSize.Width - 50);
+            float spacing;
+
+            // ограничение генерации расстояния между платформами по максимальной высоте прыжка
+            do
+            {
+                spacing = (float)(rnd.NextDouble() * (maxPlatformSpacing - minPlatformSpacing) + minPlatformSpacing);
+            }
+            while (spacing > maxJumpHeight);
+
             float y = nextPlatformY;
 
             IPlatform newPlatform;
@@ -115,7 +131,7 @@ namespace Doodle_Jump
             platforms.Add(newPlatform);
             platformsCreated++;
 
-            nextPlatformY -= platformSpacing;
+            nextPlatformY -= spacing;
         }
 
         private void StartNewGame()
@@ -123,14 +139,14 @@ namespace Doodle_Jump
             platforms.Clear();
             platformsCreated = 0;
             nextPlatformY = -40;
-            lastPlatformX = 150;  // сброс последней X позиции
+            lastPlatformX = 150;
 
-            // Добавляем стартовую платформу
-            var startPlatform = new NormalPlatform(150, 500);
+            // создаем стартовую платформу
+            var startPlatform = new NormalPlatform(150, ClientSize.Height - 100);
             platforms.Add(startPlatform);
             platformsCreated++;
 
-            // Создаем игрока НА стартовой платформе
+            // игрок на стартовой платформе
             player = new Player(
                 startPlatform.Position.X + (startPlatform.Size.Width - Player.Width) / 2,
                 startPlatform.Position.Y - Player.Height)
@@ -141,24 +157,27 @@ namespace Doodle_Jump
 
             score = 0;
 
-            // Создаём несколько платформ на экране сразу, поднимаясь вверх с шагом 60
-            for (int i = 0; i < 7; i++)
+            // заполняем экран стартовыми платформами
+            for (int i = 0; i < minVisiblePlatforms; i++)
             {
                 float x = rnd.Next(50, ClientSize.Width - 100);
-                float y = 440 - i * 60;
+                float spacing;
+
+                do
+                {
+                    spacing = (float)(rnd.NextDouble() * (maxPlatformSpacing - minPlatformSpacing) + minPlatformSpacing);
+                }
+                while (spacing > maxJumpHeight);
+
+                float y = ClientSize.Height - 160 - i * spacing;
+
                 platforms.Add(new NormalPlatform(x, y));
                 platformsCreated++;
                 lastPlatformX = x;
-                nextPlatformY = y - 60; // для последовательной генерации сверху
+                nextPlatformY = y - spacing;
             }
 
             game_timer.Start();
-        }
-
-        private bool TopIsFilled()
-        {
-            // Проверяем, есть ли платформа в верхних 10px экрана
-            return platforms.Any(p => p.Position.Y < 80);
         }
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
@@ -200,23 +219,18 @@ namespace Doodle_Jump
             {
                 player.IsOnGround = true;
                 player.VelocityY = 0;
-                // Корректируем позицию игрока, чтобы он стоял точно на платформе
                 player.Position = new PointF(player.Position.X, pl.Top - Player.Height);
                 return true;
             }
 
             return false;
         }
+
         private void GameOver()
         {
             game_timer.Stop();
             MessageBox.Show($"Игра окончена!\nСчёт: {score}", "Doodle Jump");
-
             this.Close();
-
-            // Если есть меню, можно здесь вызвать:
-            // MainMenuForm menu = new MainMenuForm();
-            // menu.Show();
         }
     }
 }
